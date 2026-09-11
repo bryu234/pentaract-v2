@@ -4,7 +4,7 @@ HTTP_PORT := $(shell awk -F= '$$1 == "PENTARACT_HTTP_PORT" {print $$2; exit}' .e
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor check-ports check-production-ports init up prod-up down restart ps logs build test lint migrate backup restore clean
+.PHONY: help doctor check-ports check-production-ports init up prod-up down restart ps logs build test lint migrate backup restore clean telegram-build telegram-check telegram-restart telegram-logs
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Pentaract V2 commands:"} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -60,6 +60,19 @@ logs: ## Follow application and Telegram API logs
 
 build: ## Build all production images
 	@$(COMPOSE) build
+
+telegram-build: ## Build Telegram image and run MTProto configuration/routing tests
+	@$(COMPOSE) build telegram-bot-api
+
+telegram-check: doctor ## Validate MTProto parameters using the built image (no Telegram connection)
+	@$(COMPOSE) run --rm --no-deps telegram-bot-api --check-config
+
+telegram-restart: telegram-build ## Validate and recreate only Telegram; preserve session volumes
+	@$(MAKE) telegram-check
+	@$(COMPOSE) up -d --no-deps --wait --wait-timeout 120 telegram-bot-api
+
+telegram-logs: ## Show only safe MTProto endpoint diagnostics
+	@$(COMPOSE) logs -f --tail=100 telegram-bot-api | awk '/Pentaract MTProto:/ {print; fflush()}'
 
 test: ## Run backend and frontend tests
 	@$(COMPOSE) run --rm --no-deps app-test

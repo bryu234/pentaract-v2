@@ -1,0 +1,59 @@
+--- a/td/telegram/net/ConnectionCreator.cpp
++++ b/td/telegram/net/ConnectionCreator.cpp
+@@ -5,6 +5,7 @@
+ // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ //
+ #include "td/telegram/net/ConnectionCreator.h"
++#include "td/telegram/net/PentaractDcOptions.h"
+ 
+ #include "td/telegram/ConfigManager.h"
+ #include "td/telegram/Global.h"
+@@ -689,6 +690,17 @@
+     extra.debug_str = PSTRING() << info.option->get_ip_address() << extra.debug_str;
+   }
+   VLOG(connections) << "Create: " << extra.debug_str;
++  if (pentaract::endpoint().enabled() && !G()->is_test_dc() && !proxy.use_proxy()) {
++    const auto &configured = pentaract::endpoint();
++    IPAddress preferred_address;
++    preferred_address.init_host_port(configured.server, configured.port).ensure();
++    const char *route = dc_id.get_raw_id() != configured.dc_id ? "other-dc" :
++                        (extra.ip_address == preferred_address ? "preferred" : "fallback");
++    // Dedicated metadata-only log; upstream verbose logs can contain bot tokens.
++    std::fprintf(stderr, "Pentaract MTProto: connect attempt dc=%d address=[%s]:%d route=%s\n",
++                 dc_id.get_raw_id(), extra.ip_address.get_ip_str().str().c_str(),
++                 extra.ip_address.get_port(), route);
++  }
+   return SocketFd::open(extra.ip_address);
+ }
+ 
+@@ -1047,6 +1059,7 @@
+ #if !TD_EMSCRIPTEN  // FIXME
+   dc_options_set_.add_dc_options(std::move(new_dc_options));
+ #endif
++  pentaract::add_preferred(dc_options_set_, pentaract::endpoint(), G()->is_test_dc());
+ }
+ 
+ void ConnectionCreator::on_dc_update(DcId dc_id, string ip_port, Promise<> promise) {
+--- a/td/telegram/net/NetQueryDispatcher.cpp
++++ b/td/telegram/net/NetQueryDispatcher.cpp
+@@ -5,6 +5,7 @@
+ // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+ //
+ #include "td/telegram/net/NetQueryDispatcher.h"
++#include "td/telegram/net/PentaractEndpoint.h"
+ 
+ #include "td/telegram/Global.h"
+ #include "td/telegram/net/AuthDataShared.h"
+@@ -371,9 +372,9 @@
+ 
+ NetQueryDispatcher::NetQueryDispatcher(const std::function<ActorShared<>()> &create_reference) {
+   auto s_main_dc_id = G()->td_db()->get_binlog_pmc()->get("main_dc_id");
+-  if (!s_main_dc_id.empty()) {
+-    main_dc_id_ = to_integer<int32>(s_main_dc_id);
+-  }
++  main_dc_id_ = pentaract::initial_dc(pentaract::endpoint(), G()->is_test_dc(),
++                                    s_main_dc_id.empty() ? 0 : to_integer<int32>(s_main_dc_id),
++                                    main_dc_id_.load(std::memory_order_relaxed));
+   delayer_ = create_actor<NetQueryDelayer>("NetQueryDelayer", create_reference());
+ #if TD_ANDROID || TD_DARWIN_IOS || TD_DARWIN_VISION_OS || TD_DARWIN_WATCH_OS || TD_TEST_VERIFICATION
+   verifier_ = create_actor<NetQueryVerifier>("NetQueryVerifier", create_reference());

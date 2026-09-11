@@ -26,6 +26,9 @@ services:
     environment:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      PENTARACT_MTPROTO_DC_ID: ${PENTARACT_MTPROTO_DC_ID:-}
+      PENTARACT_MTPROTO_SERVER: ${PENTARACT_MTPROTO_SERVER:-}
+      PENTARACT_MTPROTO_PORT: ${PENTARACT_MTPROTO_PORT:-}
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/8081'"]
       interval: 10s

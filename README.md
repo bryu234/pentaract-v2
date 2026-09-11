@@ -79,6 +79,12 @@ make down
 
 `make up` checks the host port before starting. `make down` preserves all volumes and files.
 
+## MTProto endpoint
+
+If `api.telegram.org` is unreachable, file transfers already use MTProto through
+the local Bot API. You can additionally configure a preferred Production DC/IP/port
+with automatic TDLib fallback. See the [configuration and server trial guide](docs/MTPROTO.md).
+
 ## Backup and migration
 
 ```bash
