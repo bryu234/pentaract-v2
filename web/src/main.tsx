@@ -4,9 +4,9 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import {
   Alert, AppBar, Box, Breadcrumbs, Button, CircularProgress, Container, CssBaseline, Dialog, DialogActions,
   DialogContent, DialogTitle, IconButton, LinearProgress, List, ListItem, ListItemButton, ListItemIcon,
-  ListItemText, Paper, Stack, Tab, Tabs, TextField, ThemeProvider, Toolbar, Typography, createTheme,
+  ListItemText, MenuItem, Paper, Stack, Tab, Tabs, TextField, ThemeProvider, Toolbar, Typography, createTheme,
 } from '@mui/material'
-import { Delete, Download, Folder, InsertDriveFile, Logout, Restore, Settings } from '@mui/icons-material'
+import { Delete, Download, DriveFileMove, Folder, InsertDriveFile, Logout, Restore, Settings } from '@mui/icons-material'
 import { api, formatBytes, NodeItem, progressPercent, setCSRF, uploadFile } from './api'
 
 const queryClient = new QueryClient()
@@ -35,7 +35,48 @@ function Dashboard({email,onLogout}:{email:string;onLogout:()=>void}) { const[ta
 
 function Files(){const[parents,setParents]=useState<{id:string|null;name:string}[]>([{id:null,name:'Home'}]);const parent=parents.at(-1)!;const[search,setSearch]=useState('');const[uploadProgress,setUploadProgress]=useState<Record<string,number>>({});const[error,setError]=useState('');const key=['files',parent.id,search];const listing=useQuery({queryKey:key,queryFn:()=>api<{items:NodeItem[]}>(`/files?${search?`q=${encodeURIComponent(search)}`:parent.id?`parent_id=${parent.id}`:''}`),refetchInterval:2000});const createFolder=async()=>{const name=prompt('Folder name');if(!name)return;await api('/folders',{method:'POST',body:JSON.stringify({name,parent_id:parent.id})});listing.refetch()};const upload=async(files:FileList|null)=>{for(const file of Array.from(files??[])){try{setUploadProgress(v=>({...v,[file.name]:0}));await uploadFile(file,parent.id,p=>setUploadProgress(v=>({...v,[file.name]:p})));listing.refetch()}catch(e){setError((e as Error).message)}finally{setUploadProgress(v=>{const next={...v};delete next[file.name];return next})}}};return <Stack spacing={2}>{error&&<Alert severity="error" onClose={()=>setError('')}>{error}</Alert>}<Stack direction={{xs:'column',sm:'row'}} spacing={2}><TextField size="small" label="Search" value={search} onChange={e=>setSearch(e.target.value)} sx={{flexGrow:1}}/><Button variant="outlined" onClick={createFolder}>New folder</Button><Button variant="contained" component="label">Upload<input hidden multiple type="file" onChange={e=>upload(e.target.files)}/></Button></Stack><Breadcrumbs>{parents.map((p,i)=><Button key={p.id??'root'} size="small" onClick={()=>setParents(v=>v.slice(0,i+1))}>{p.name}</Button>)}</Breadcrumbs>{Object.entries(uploadProgress).map(([name,value])=><Box key={name}><Typography variant="caption">Uploading to this Mac: {name} · {Math.floor(value*100)}%</Typography><LinearProgress variant="determinate" value={value*100}/></Box>)}<Paper><List>{listing.data?.items.length?listing.data.items.map(item=><NodeRow key={item.id} item={item} open={()=>item.kind==='folder'&&setParents(v=>[...v,{id:item.id,name:item.name}])} refresh={()=>listing.refetch()}/>):<ListItem><ListItemText primary="This folder is empty"/></ListItem>}</List></Paper></Stack>}
 
-function NodeRow({item,open,refresh}:{item:NodeItem;open:()=>void;refresh:()=>void}){const rename=async()=>{const name=prompt('New name',item.name);if(name){await api(`/files/${item.id}`,{method:'PATCH',body:JSON.stringify({name})});refresh()}};const remove=async()=>{if(confirm(`Move ${item.name} to trash?`)){await api(`/files/${item.id}`,{method:'DELETE'});refresh()}};const progress=item.progress_bytes??0;const active=item.state==='uploading'||item.state==='processing';const stage=item.state==='uploading'?'Uploading to this Mac':'Sending to Telegram';return <ListItem secondaryAction={<Stack direction="row">{item.kind==='file'&&item.state==='ready'&&<IconButton component="a" href={`/api/v1/files/${item.id}/download`}><Download/></IconButton>}<IconButton onClick={remove}><Delete/></IconButton></Stack>} disablePadding><ListItemButton onClick={item.kind==='folder'?open:rename}><ListItemIcon>{item.kind==='folder'?<Folder color="primary"/>:<InsertDriveFile/>}</ListItemIcon><ListItemText primary={item.name} secondary={<Box sx={{pr:2}}><Typography variant="body2" color="text.secondary">{formatBytes(item.size)}{item.state?` · ${item.state}`:''}{item.error?` · ${item.error}`:''}</Typography>{active&&<><Typography variant="caption" color="text.secondary">{stage}: {formatBytes(progress)} of {formatBytes(item.size)} · {progressPercent(progress,item.size)}%. Keep this Mac awake until ready.</Typography><LinearProgress variant="determinate" value={progressPercent(progress,item.size)} sx={{mt:0.5}}/></>}{item.state==='queued'&&<Typography variant="caption" color="text.secondary">Waiting to send to Telegram. Keep this Mac awake until ready.</Typography>}</Box>}/></ListItemButton></ListItem>}
+function NodeRow({item,open,refresh}:{item:NodeItem;open:()=>void;refresh:()=>void}){
+  const [moveOpen,setMoveOpen]=useState(false)
+  const rename=async()=>{const name=prompt('New name',item.name);if(name){await api(`/files/${item.id}`,{method:'PATCH',body:JSON.stringify({name})});refresh()}}
+  const remove=async()=>{if(confirm(`Move ${item.name} to trash?`)){await api(`/files/${item.id}`,{method:'DELETE'});refresh()}}
+  const progress=item.progress_bytes??0
+  const active=item.state==='uploading'||item.state==='processing'
+  const stage=item.state==='uploading'?'Uploading to this Mac':'Sending to Telegram'
+  return <>
+    <ListItem secondaryAction={<Stack direction="row">
+      {item.kind==='file'&&item.state==='ready'&&<IconButton aria-label={`Move ${item.name}`} title="Move file" onClick={()=>setMoveOpen(true)}><DriveFileMove/></IconButton>}
+      {item.kind==='file'&&item.state==='ready'&&<IconButton component="a" href={`/api/v1/files/${item.id}/download`}><Download/></IconButton>}
+      <IconButton onClick={remove}><Delete/></IconButton>
+    </Stack>} disablePadding>
+      <ListItemButton onClick={item.kind==='folder'?open:rename}><ListItemIcon>{item.kind==='folder'?<Folder color="primary"/>:<InsertDriveFile/>}</ListItemIcon><ListItemText primary={item.name} secondary={<Box sx={{pr:2}}><Typography variant="body2" color="text.secondary">{formatBytes(item.size)}{item.state?` · ${item.state}`:''}{item.error?` · ${item.error}`:''}</Typography>{active&&<><Typography variant="caption" color="text.secondary">{stage}: {formatBytes(progress)} of {formatBytes(item.size)} · {progressPercent(progress,item.size)}%. Keep this Mac awake until ready.</Typography><LinearProgress variant="determinate" value={progressPercent(progress,item.size)} sx={{mt:0.5}}/></>}{item.state==='queued'&&<Typography variant="caption" color="text.secondary">Waiting to send to Telegram. Keep this Mac awake until ready.</Typography>}</Box>}/></ListItemButton>
+    </ListItem>
+    {moveOpen&&<MoveFileDialog item={item} onClose={()=>setMoveOpen(false)} onMoved={()=>{setMoveOpen(false);refresh();queryClient.invalidateQueries({queryKey:['files']})}}/>}
+  </>
+}
+
+function MoveFileDialog({item,onClose,onMoved}:{item:NodeItem;onClose:()=>void;onMoved:()=>void}){
+  const [destination,setDestination]=useState(item.parent_id??'')
+  const [error,setError]=useState('')
+  const [moving,setMoving]=useState(false)
+  const folders=useQuery({queryKey:['folders'],queryFn:()=>api<{items:{id:string;path:string}[]}>('/folders')})
+  const move=async()=>{
+    setMoving(true);setError('')
+    try{await api(`/files/${item.id}/move`,{method:'POST',body:JSON.stringify({parent_id:destination||null})});onMoved()}
+    catch(e){setError((e as Error).message);setMoving(false)}
+  }
+  return <Dialog open onClose={onClose} fullWidth maxWidth="sm">
+    <DialogTitle>Move {item.name}</DialogTitle>
+    <DialogContent>
+      {error&&<Alert severity="error" sx={{mb:2}}>{error}</Alert>}
+      {folders.isError&&<Alert severity="error">Could not load folders.</Alert>}
+      <TextField select fullWidth label="Destination" value={destination} onChange={e=>setDestination(e.target.value)} disabled={folders.isLoading||folders.isError||moving} sx={{mt:1}}>
+        <MenuItem value="">Home</MenuItem>
+        {folders.data?.items.map(folder=><MenuItem key={folder.id} value={folder.id}>{folder.path}</MenuItem>)}
+      </TextField>
+    </DialogContent>
+    <DialogActions><Button onClick={onClose} disabled={moving}>Cancel</Button><Button onClick={move} disabled={folders.isLoading||folders.isError||moving||destination===(item.parent_id??'')}>Move</Button></DialogActions>
+  </Dialog>
+}
 
 function Trash(){const listing=useQuery({queryKey:['trash'],queryFn:()=>api<{items:NodeItem[]}>('/trash')});const restore=async(id:string)=>{await api(`/files/${id}/restore`,{method:'POST'});listing.refetch()};return <Paper><List>{listing.data?.items.map(item=><ListItem key={item.id} secondaryAction={<IconButton onClick={()=>restore(item.id)}><Restore/></IconButton>}><ListItemIcon>{item.kind==='folder'?<Folder/>:<InsertDriveFile/>}</ListItemIcon><ListItemText primary={item.name} secondary={item.purge_after?`Purges ${new Date(item.purge_after).toLocaleString()}`:''}/></ListItem>)}</List></Paper>}
 

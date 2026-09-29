@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -60,8 +61,10 @@ func (s *Server) Handler() http.Handler {
 			private.Get("/settings/telegram", s.getTelegramSettings)
 			private.Put("/settings/telegram", s.putTelegramSettings)
 			private.Get("/files", s.listFiles)
+			private.Get("/folders", s.listFolders)
 			private.Post("/folders", s.createFolder)
 			private.Patch("/files/{id}", s.renameNode)
+			private.Post("/files/{id}/move", s.moveFile)
 			private.Delete("/files/{id}", s.trashNode)
 			private.Post("/files/{id}/restore", s.restoreNode)
 			private.Get("/files/{id}/download", s.download)
@@ -388,6 +391,97 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+const visibleFolders = `WITH RECURSIVE folders AS (
+	SELECT id,parent_id,name::text AS path FROM nodes WHERE kind='folder' AND parent_id IS NULL AND deleted_at IS NULL
+	UNION ALL
+	SELECT n.id,n.parent_id,folders.path || ' / ' || n.name FROM nodes n JOIN folders ON n.parent_id=folders.id
+	WHERE n.kind='folder' AND n.deleted_at IS NULL
+)`
+
+type folderDTO struct {
+	ID       uuid.UUID  `json:"id"`
+	ParentID *uuid.UUID `json:"parent_id"`
+	Path     string     `json:"path"`
+}
+
+func (s *Server) listFolders(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.DB.Query(r.Context(), visibleFolders+` SELECT id,parent_id,path FROM folders ORDER BY lower(path)`)
+	if err != nil {
+		problem(w, 500, "cannot list folders")
+		return
+	}
+	defer rows.Close()
+	items := []folderDTO{}
+	for rows.Next() {
+		var folder folderDTO
+		if err := rows.Scan(&folder.ID, &folder.ParentID, &folder.Path); err != nil {
+			problem(w, 500, "cannot list folders")
+			return
+		}
+		items = append(items, folder)
+	}
+	if rows.Err() != nil {
+		problem(w, 500, "cannot list folders")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func (s *Server) moveFile(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		problem(w, 400, "invalid file id")
+		return
+	}
+	var in struct {
+		ParentID *uuid.UUID `json:"parent_id"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	var name string
+	var oldParent *uuid.UUID
+	if err := s.DB.QueryRow(r.Context(), `SELECT name,parent_id FROM nodes WHERE id=$1 AND kind='file' AND deleted_at IS NULL`, id).Scan(&name, &oldParent); err != nil {
+		problem(w, 404, "file not found")
+		return
+	}
+	if (oldParent == nil && in.ParentID == nil) || (oldParent != nil && in.ParentID != nil && *oldParent == *in.ParentID) {
+		problem(w, 409, "file is already in this folder")
+		return
+	}
+	if in.ParentID != nil {
+		var valid bool
+		if err := s.DB.QueryRow(r.Context(), visibleFolders+` SELECT EXISTS(SELECT 1 FROM folders WHERE id=$1)`, in.ParentID).Scan(&valid); err != nil {
+			problem(w, 500, "cannot validate destination folder")
+			return
+		}
+		if !valid {
+			problem(w, 400, "destination folder does not exist")
+			return
+		}
+	}
+	var exists bool
+	if err := s.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes WHERE parent_id IS NOT DISTINCT FROM $1 AND lower(name)=lower($2) AND deleted_at IS NULL)`, in.ParentID, name).Scan(&exists); err != nil {
+		problem(w, 500, "cannot check destination folder")
+		return
+	}
+	if exists {
+		problem(w, 409, "a file or folder with this name already exists in the destination")
+		return
+	}
+	n, err := scanNode(s.DB.QueryRow(r.Context(), `UPDATE nodes SET parent_id=$2,updated_at=now() WHERE id=$1 AND kind='file' AND deleted_at IS NULL RETURNING `+nodeColumns, id, in.ParentID))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			problem(w, 409, "a file or folder with this name already exists in the destination")
+		} else {
+			problem(w, 500, "cannot move file")
+		}
+		return
+	}
+	writeJSON(w, 200, n)
 }
 
 func (s *Server) createFolder(w http.ResponseWriter, r *http.Request) {
