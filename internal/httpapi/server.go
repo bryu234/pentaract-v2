@@ -345,6 +345,8 @@ type nodeDTO struct {
 	State         *string    `json:"state"`
 	Error         *string    `json:"error,omitempty"`
 	ProgressBytes *int64     `json:"progress_bytes,omitempty"`
+	FileCount     *int64     `json:"file_count,omitempty"`
+	TotalSize     *int64     `json:"total_size,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 	PurgeAfter    *time.Time `json:"purge_after,omitempty"`
@@ -384,10 +386,58 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	items := []nodeDTO{}
+	folderIDs := []uuid.UUID{}
 	for rows.Next() {
 		n, e := scanNode(rows)
-		if e == nil {
-			items = append(items, n)
+		if e != nil {
+			problem(w, 500, "cannot read files")
+			return
+		}
+		if n.Kind == "folder" {
+			folderIDs = append(folderIDs, n.ID)
+		}
+		items = append(items, n)
+	}
+	if rows.Err() != nil {
+		problem(w, 500, "cannot read files")
+		return
+	}
+	rows.Close()
+	if len(folderIDs) > 0 {
+		counts, err := s.DB.Query(r.Context(), `WITH RECURSIVE folder_tree AS (
+			SELECT id AS folder_id,id AS node_id FROM nodes WHERE id=ANY($1::uuid[]) AND kind='folder' AND deleted_at IS NULL
+			UNION ALL
+			SELECT folder_tree.folder_id,n.id FROM nodes n JOIN folder_tree ON n.parent_id=folder_tree.node_id
+			WHERE n.kind='folder' AND n.deleted_at IS NULL
+		) SELECT folder_tree.folder_id,COUNT(f.id),COALESCE(SUM(f.size),0)::bigint
+		FROM folder_tree LEFT JOIN nodes f ON f.parent_id=folder_tree.node_id AND f.kind='file' AND f.deleted_at IS NULL
+		GROUP BY folder_tree.folder_id`, folderIDs)
+		if err != nil {
+			problem(w, 500, "cannot count folder contents")
+			return
+		}
+		defer counts.Close()
+		totals := map[uuid.UUID][2]int64{}
+		for counts.Next() {
+			var id uuid.UUID
+			var count, size int64
+			if err := counts.Scan(&id, &count, &size); err != nil {
+				problem(w, 500, "cannot count folder contents")
+				return
+			}
+			totals[id] = [2]int64{count, size}
+		}
+		if counts.Err() != nil {
+			problem(w, 500, "cannot count folder contents")
+			return
+		}
+		for i := range items {
+			if items[i].Kind == "folder" {
+				total := totals[items[i].ID]
+				count, size := total[0], total[1]
+				items[i].FileCount = &count
+				items[i].TotalSize = &size
+			}
 		}
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
