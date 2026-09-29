@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes } from './api'
+import { formatBytes, progressPercent } from './api'
 
 describe('formatBytes', () => {
   it('formats binary units', () => {
@@ -9,3 +9,10 @@ describe('formatBytes', () => {
   })
 })
 
+describe('progressPercent', () => {
+  it('uses acknowledged bytes and stays within progress bar bounds', () => {
+    expect(progressPercent(256, 1024)).toBe(25)
+    expect(progressPercent(0, 0)).toBe(0)
+    expect(progressPercent(1200, 1024)).toBe(100)
+  })
+})

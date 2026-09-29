@@ -23,6 +23,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export type NodeItem = {
   id: string; parent_id: string | null; name: string; kind: 'file' | 'folder'; size: number;
   state?: 'uploading' | 'queued' | 'processing' | 'ready' | 'failed'; error?: string;
+  progress_bytes?: number;
   created_at: string; deleted_at?: string; purge_after?: string;
 }
 
@@ -31,6 +32,11 @@ export function formatBytes(value: number): string {
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
   return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`
+}
+
+export function progressPercent(bytes: number, total: number): number {
+  if (total <= 0) return 0
+  return Math.min(100, Math.max(0, Math.floor(bytes / total * 100)))
 }
 
 export async function uploadFile(file: File, parentId: string | null, onProgress: (value: number) => void) {

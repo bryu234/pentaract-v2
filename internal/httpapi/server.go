@@ -334,25 +334,29 @@ func (s *Server) putTelegramSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 type nodeDTO struct {
-	ID         uuid.UUID  `json:"id"`
-	ParentID   *uuid.UUID `json:"parent_id"`
-	Name       string     `json:"name"`
-	Kind       string     `json:"kind"`
-	Size       int64      `json:"size"`
-	State      *string    `json:"state"`
-	Error      *string    `json:"error,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
-	PurgeAfter *time.Time `json:"purge_after,omitempty"`
+	ID            uuid.UUID  `json:"id"`
+	ParentID      *uuid.UUID `json:"parent_id"`
+	Name          string     `json:"name"`
+	Kind          string     `json:"kind"`
+	Size          int64      `json:"size"`
+	State         *string    `json:"state"`
+	Error         *string    `json:"error,omitempty"`
+	ProgressBytes *int64     `json:"progress_bytes,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	PurgeAfter    *time.Time `json:"purge_after,omitempty"`
 }
 
 func scanNode(row pgx.Row) (nodeDTO, error) {
 	var n nodeDTO
-	err := row.Scan(&n.ID, &n.ParentID, &n.Name, &n.Kind, &n.Size, &n.State, &n.Error, &n.CreatedAt, &n.DeletedAt, &n.PurgeAfter)
+	err := row.Scan(&n.ID, &n.ParentID, &n.Name, &n.Kind, &n.Size, &n.State, &n.Error, &n.ProgressBytes, &n.CreatedAt, &n.DeletedAt, &n.PurgeAfter)
 	return n, err
 }
 
-const nodeColumns = `id,parent_id,name,kind::text,size,state::text,error_message,created_at,deleted_at,purge_after`
+const nodeColumns = `id,parent_id,name,kind::text,size,state::text,error_message,
+	CASE WHEN state='uploading' THEN COALESCE((SELECT received_size FROM upload_sessions WHERE node_id=nodes.id),0)
+	WHEN state='processing' THEN COALESCE((SELECT SUM(plain_size) FROM file_chunks WHERE node_id=nodes.id),0)
+	ELSE NULL END AS progress_bytes,created_at,deleted_at,purge_after`
 
 func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 	parent := r.URL.Query().Get("parent_id")
