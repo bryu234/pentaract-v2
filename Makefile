@@ -36,9 +36,9 @@ check-production-ports: ## Ensure HTTPS ports are free before production start
 init: ## Create local config and generate the encryption master key
 	@test -f .env || cp .env.example .env
 	@mkdir -p data/secrets data/uploads data/backups
-	@test -s data/secrets/master.key || docker run --rm alpine:3.22 sh -c 'head -c 32 /dev/urandom' > data/secrets/master.key
+	@if ! test -s data/secrets/master.key && ! test -n "$$PENTARACT_MASTER_KEY" && ! awk -F= '$$1 == "PENTARACT_MASTER_KEY" && length($$2)>0 {found=1} END {exit !found}' .env; then docker run --rm alpine:3.22 sh -c 'head -c 32 /dev/urandom' > data/secrets/master.key; fi
 	@chmod 600 data/secrets/master.key 2>/dev/null || true
-	@echo "Initialized .env and data/secrets/master.key; set TELEGRAM_API_ID and TELEGRAM_API_HASH"
+	@echo "Initialized configuration; keep your recovery key offline and set Telegram API credentials"
 
 up: doctor check-ports ## Build and start the complete stack
 	@$(COMPOSE) up -d --build --remove-orphans

@@ -47,8 +47,12 @@ func Verify(ctx context.Context, source, target *pgxpool.Pool, tg *telegram.Clie
 		return e
 	}
 	var before, after int64
-	source.QueryRow(ctx, `SELECT count(*) FROM nodes WHERE kind='folder' OR state='ready'`).Scan(&before)
-	target.QueryRow(ctx, `SELECT count(*) FROM nodes`).Scan(&after)
+	if e = source.QueryRow(ctx, `SELECT count(*) FROM nodes WHERE kind='folder' OR state='ready'`).Scan(&before); e != nil {
+		return e
+	}
+	if e = target.QueryRow(ctx, `SELECT count(*) FROM nodes`).Scan(&after); e != nil {
+		return e
+	}
 	if before != after {
 		return errors.New("catalog record count mismatch")
 	}
