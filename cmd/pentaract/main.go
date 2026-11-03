@@ -22,6 +22,7 @@ import (
 	"encoding/base64"
 	"filippo.io/age"
 	"github.com/bryu234/pentaract-v2/internal/config"
+	"github.com/bryu234/pentaract-v2/internal/cryptostore"
 	"github.com/bryu234/pentaract-v2/internal/database"
 	"github.com/bryu234/pentaract-v2/internal/httpapi"
 	"github.com/bryu234/pentaract-v2/internal/recovery"
@@ -112,7 +113,7 @@ func run(logger *slog.Logger, args []string) error {
 			return err
 		}
 		return closeErr
-	case "catalog-publish", "catalog-restore", "recovery-resume", "catalog-verify":
+	case "catalog-publish", "catalog-restore", "recovery-resume", "catalog-verify", "bot-logout":
 		pool, err := database.Open(ctx, cfg.DatabaseURL)
 		if err != nil {
 			return err
@@ -126,6 +127,17 @@ func run(logger *slog.Logger, args []string) error {
 			return err
 		}
 		tg := telegram.New(cfg.TelegramAPIURL)
+		if command == "bot-logout" {
+			var sealed []byte
+			if err = pool.QueryRow(ctx, `SELECT bot_token_enc FROM telegram_settings WHERE id=1`).Scan(&sealed); err != nil {
+				return err
+			}
+			token, err := cryptostore.OpenSecret(key, sealed)
+			if err != nil {
+				return err
+			}
+			return tg.Logout(ctx, string(token))
+		}
 		if command == "catalog-verify" {
 			url := os.Getenv("RECOVERY_VERIFY_DATABASE_URL")
 			if url == "" || url == cfg.DatabaseURL {

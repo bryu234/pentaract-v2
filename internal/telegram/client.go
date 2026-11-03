@@ -151,7 +151,7 @@ func request[T any](ctx context.Context, c *Client, token, method string, values
 				time.Sleep(time.Duration(attempt+1) * time.Second)
 				continue
 			}
-			return zero, fmt.Errorf("Telegram %s request: %w", method, err)
+			return zero, fmt.Errorf("Telegram %s transport failed", method)
 		}
 		payload, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		resp.Body.Close()
@@ -204,4 +204,10 @@ func (c *Client) CatalogFile(ctx context.Context, token string, chatID int64) (s
 		return "", errors.New("recovery catalog is not pinned; use RECOVERY_FILE")
 	}
 	return c.ResolveFile(ctx, token, chat.Message.Document.FileID)
+}
+
+// Logout releases a bot before switching Local Bot API servers.
+func (c *Client) Logout(ctx context.Context, token string) error {
+	_, err := request[bool](ctx, c, token, "logOut", nil, false)
+	return err
 }

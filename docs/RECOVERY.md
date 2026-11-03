@@ -47,8 +47,10 @@ Incomplete uploads and permanently deleted data are not recoverable.
 
 Use the encrypted full backup to preserve the owner, TOTP and settings. Complete
 uploads, stop writes, publish the catalog, create a full backup and keep an off-host
-copy of it and its password. Stop the old app before starting another Local Bot API
-with the same bot. Preserve the old PostgreSQL volumes and key for rollback.
+copy of it and its password. Stop the old app, call `pentaract bot-logout`
+against its Local Bot API, then stop the old Bot API before starting the new one.
+This follows the upstream local-server migration procedure:
+https://github.com/tdlib/telegram-bot-api#moving-a-bot-from-one-local-server-to-another Preserve the old PostgreSQL volumes and key for rollback.
 
 On homeserver-out use:
 
@@ -62,3 +64,7 @@ network. Configure NPM upstream HTTP `pentaract-v2-app:8080`, HTTPS, force SSL,
 and an upload size/timeout suitable for large files. Secure cookies are enabled.
 Set `PENTARACT_PUBLIC_URL` to the actual HTTPS URL. Check port availability before
 starting any alternative local setup. Do not start the Caddy production profile.
+
+For a verification import into a disposable empty PostgreSQL database, use
+`pentaract catalog-verify` with `RECOVERY_VERIFY_DATABASE_URL`. It downloads only
+the two smallest files of at most 5 MiB each and compares their checksums.
