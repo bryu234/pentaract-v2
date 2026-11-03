@@ -59,6 +59,8 @@ docker compose -f docker-compose.yml -f docker-compose.server.yml config -q
 docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --build
 ```
 
+The server overlay uses the separate project `pentaract-v2-home` and its own
+persistent volumes; pre-existing `pentaract-v2` volumes remain untouched.
 The server overlay publishes no host ports. Only app joins the external `npm`
 network. Configure NPM upstream HTTP `pentaract-v2-app:8080`, HTTPS, force SSL,
 and an upload size/timeout suitable for large files. Secure cookies are enabled.

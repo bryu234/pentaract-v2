@@ -1,5 +1,7 @@
+name: pentaract-v2-home
 services:
   app:
+    image: pentaract-v2-app
     ports: !reset []
     networks:
       pentaract: {}
@@ -7,6 +9,8 @@ services:
         aliases: [pentaract-v2-app]
     environment:
       PENTARACT_COOKIE_SECURE: "true"
+  telegram-bot-api:
+    image: pentaract-v2-telegram-bot-api
 networks:
   proxy:
     external: true
