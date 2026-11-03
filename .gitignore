@@ -8,3 +8,6 @@ web/vite.config.d.ts
 coverage/
 *.pv2backup
 *.tmp
+
+# Host-specific Compose selection
+docker-compose.override.yml

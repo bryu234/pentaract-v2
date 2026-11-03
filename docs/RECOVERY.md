@@ -52,11 +52,13 @@ against its Local Bot API, then stop the old Bot API before starting the new one
 This follows the upstream local-server migration procedure:
 https://github.com/tdlib/telegram-bot-api#moving-a-bot-from-one-local-server-to-another Preserve the old PostgreSQL volumes and key for rollback.
 
-On homeserver-out use:
+On homeserver-out select the server overlay once; standard `make` commands then
+operate on the correct server project:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.server.yml config -q
-docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --build
+ln -s docker-compose.server.yml docker-compose.override.yml
+make doctor
+make up
 ```
 
 The server overlay uses the separate project `pentaract-v2-home` and its own
