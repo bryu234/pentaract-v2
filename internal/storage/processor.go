@@ -11,6 +11,7 @@ import (
 
 	"github.com/bryu234/pentaract-v2/internal/config"
 	"github.com/bryu234/pentaract-v2/internal/cryptostore"
+	"github.com/bryu234/pentaract-v2/internal/recovery"
 	"github.com/bryu234/pentaract-v2/internal/telegram"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -41,10 +42,21 @@ func (p *Processor) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			var paused bool
+			if err := p.DB.QueryRow(ctx, `SELECT paused FROM recovery_status WHERE id=1`).Scan(&paused); err != nil || paused {
+				continue
+			}
+			if err := recovery.Publish(ctx, p.DB, p.Telegram, p.MasterKey, p.Config.SharedDir); err != nil {
+				p.Logger.Warn("catalog publication failed")
+				_, _ = p.DB.Exec(ctx, `UPDATE recovery_status SET error=$1 WHERE id=1`, "Publication failed; retrying")
+			}
 			p.processNext(ctx)
 		case <-trashTicker.C:
-			p.purgeTrash(ctx)
-			p.cleanupExpiredUploads(ctx)
+			// Remote purge is deferred until a durable tombstone publication is implemented.
+			var paused bool
+			if err := p.DB.QueryRow(ctx, `SELECT paused FROM recovery_status WHERE id=1`).Scan(&paused); err == nil && !paused {
+				p.cleanupExpiredUploads(ctx)
+			}
 		}
 	}
 }
@@ -174,7 +186,7 @@ func (p *Processor) processFile(ctx context.Context, nodeID uuid.UUID) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `UPDATE nodes SET state='ready',plain_hash=$2,error_message=NULL,updated_at=now() WHERE id=$1`, nodeID, hasher.Sum(nil)); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE nodes SET state='ready',recovery_pending=true,plain_hash=$2,error_message=NULL,updated_at=now() WHERE id=$1`, nodeID, hasher.Sum(nil)); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM upload_sessions WHERE node_id=$1`, nodeID); err != nil {

@@ -5,10 +5,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates clang cmake git gperf libc++-dev libc++abi-dev \
     libssl-dev make zlib1g-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
-RUN git clone --recursive https://github.com/tdlib/telegram-bot-api.git source \
+RUN git init source \
     && cd source \
-    && git checkout "${TELEGRAM_BOT_API_COMMIT}" \
-    && git submodule update --init --recursive
+    && git remote add origin https://github.com/tdlib/telegram-bot-api.git \
+    && git fetch --depth 1 origin "${TELEGRAM_BOT_API_COMMIT}" \
+    && git checkout --detach FETCH_HEAD \
+    && git submodule update --init --recursive --depth 1
 RUN cmake -S source -B output -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/opt/telegram-bot-api \
     -DCMAKE_CXX_FLAGS="-stdlib=libc++" \

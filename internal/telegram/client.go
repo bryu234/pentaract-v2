@@ -183,3 +183,25 @@ func request[T any](ctx context.Context, c *Client, token, method string, values
 	}
 	return zero, fmt.Errorf("Telegram %s failed after retries", method)
 }
+
+func (c *Client) Pin(ctx context.Context, token string, chatID, messageID int64) error {
+	_, err := request[bool](ctx, c, token, "pinChatMessage", url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}, "message_id": {strconv.FormatInt(messageID, 10)}, "disable_notification": {"true"}}, true)
+	return err
+}
+func (c *Client) CatalogFile(ctx context.Context, token string, chatID int64) (string, error) {
+	type pinned struct {
+		ID      int64 `json:"id"`
+		Message struct {
+			Caption  string   `json:"caption"`
+			Document Document `json:"document"`
+		} `json:"pinned_message"`
+	}
+	chat, err := request[pinned](ctx, c, token, "getChat", url.Values{"chat_id": {strconv.FormatInt(chatID, 10)}}, false)
+	if err != nil {
+		return "", err
+	}
+	if chat.Message.Caption != "pentaract-v2:recovery:1" || chat.Message.Document.FileID == "" {
+		return "", errors.New("recovery catalog is not pinned; use RECOVERY_FILE")
+	}
+	return c.ResolveFile(ctx, token, chat.Message.Document.FileID)
+}

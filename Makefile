@@ -84,3 +84,15 @@ restore: doctor ## Restore BACKUP_FILE using BACKUP_PASSPHRASE
 clean: ## Remove rebuildable local build output only; persistent volumes remain
 	@$(COMPOSE) down --remove-orphans
 	@rm -rf web/dist coverage
+
+catalog-publish: doctor ## Publish the encrypted recovery catalog
+	@$(COMPOSE) run --rm app catalog-publish
+
+catalog-restore: doctor ## Restore catalog into an empty DB using RECOVERY_BOT_TOKEN and RECOVERY_CHAT_ID
+	@$(COMPOSE) run --rm -e RECOVERY_BOT_TOKEN -e RECOVERY_CHAT_ID -e RECOVERY_FILE app catalog-restore
+
+export-key: doctor ## Export base64 key to KEY_OUTPUT under a mounted directory
+	@$(COMPOSE) run --rm -e KEY_OUTPUT app export-key
+
+recovery-resume: doctor ## Enable writes after catalog recovery
+	@$(COMPOSE) run --rm app recovery-resume

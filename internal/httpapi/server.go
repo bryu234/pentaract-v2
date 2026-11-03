@@ -56,8 +56,34 @@ func (s *Server) Handler() http.Handler {
 		api.Post("/auth/login", s.login)
 		api.Group(func(private chi.Router) {
 			private.Use(s.authenticate, s.csrf)
+			private.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != "GET" && r.Method != "HEAD" && !strings.HasPrefix(r.URL.Path, "/api/v1/auth/") {
+						var paused bool
+						if err := s.DB.QueryRow(r.Context(), `SELECT paused FROM recovery_status WHERE id=1`).Scan(&paused); err != nil {
+							problem(w, 503, "recovery status unavailable")
+							return
+						}
+						if paused {
+							problem(w, 409, "Recovered storage is read-only; run recovery-resume to enable writes")
+							return
+						}
+					}
+					next.ServeHTTP(w, r)
+				})
+			})
 			private.Get("/auth/session", s.currentSession)
 			private.Delete("/auth/session", s.logout)
+			private.Get("/recovery/status", func(w http.ResponseWriter, r *http.Request) {
+				var data []byte
+				err := s.DB.QueryRow(r.Context(), `SELECT row_to_json(r) FROM recovery_status r WHERE id=1`).Scan(&data)
+				if err != nil {
+					problem(w, 500, "cannot read recovery status")
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(data)
+			})
 			private.Get("/settings/telegram", s.getTelegramSettings)
 			private.Put("/settings/telegram", s.putTelegramSettings)
 			private.Get("/files", s.listFiles)
@@ -319,6 +345,15 @@ func (s *Server) putTelegramSettings(w http.ResponseWriter, r *http.Request) {
 		problem(w, 502, err.Error())
 		return
 	}
+	var incompatible bool
+	if err = s.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM telegram_settings WHERE (chat_id<>$1 OR bot_user_id<>$2) AND EXISTS(SELECT 1 FROM nodes))`, in.ChatID, bot.ID).Scan(&incompatible); err != nil {
+		problem(w, 500, "cannot check storage identity")
+		return
+	}
+	if incompatible {
+		problem(w, 409, "Cannot change bot or channel while storage contains files")
+		return
+	}
 	sealed, err := cryptostore.SealSecret(s.MasterKey, []byte(in.BotToken))
 	if err != nil {
 		problem(w, 500, "cannot encrypt bot token")
@@ -358,7 +393,7 @@ func scanNode(row pgx.Row) (nodeDTO, error) {
 	return n, err
 }
 
-const nodeColumns = `id,parent_id,name,kind::text,size,state::text,error_message,
+const nodeColumns = `id,parent_id,name,kind::text,size,CASE WHEN state='ready' AND recovery_pending THEN 'syncing' ELSE state::text END,error_message,
 	CASE WHEN state='uploading' THEN COALESCE((SELECT received_size FROM upload_sessions WHERE node_id=nodes.id),0)
 	WHEN state='processing' THEN COALESCE((SELECT SUM(plain_size) FROM file_chunks WHERE node_id=nodes.id),0)
 	ELSE NULL END AS progress_bytes,created_at,deleted_at,purge_after`
@@ -798,7 +833,7 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	var name string
 	var size int64
 	var wrapped []byte
-	err = s.DB.QueryRow(r.Context(), `SELECT name,size,wrapped_key FROM nodes WHERE id=$1 AND kind='file' AND state='ready' AND deleted_at IS NULL`, nodeID).Scan(&name, &size, &wrapped)
+	err = s.DB.QueryRow(r.Context(), `SELECT name,size,wrapped_key FROM nodes WHERE id=$1 AND kind='file' AND state='ready' AND NOT recovery_pending AND deleted_at IS NULL`, nodeID).Scan(&name, &size, &wrapped)
 	if err != nil {
 		problem(w, 404, "ready file not found")
 		return

@@ -19,13 +19,16 @@ import (
 	"syscall"
 	"time"
 
+	"encoding/base64"
 	"filippo.io/age"
 	"github.com/bryu234/pentaract-v2/internal/config"
 	"github.com/bryu234/pentaract-v2/internal/database"
 	"github.com/bryu234/pentaract-v2/internal/httpapi"
+	"github.com/bryu234/pentaract-v2/internal/recovery"
 	"github.com/bryu234/pentaract-v2/internal/storage"
 	"github.com/bryu234/pentaract-v2/internal/telegram"
 	"github.com/bryu234/pentaract-v2/internal/webui"
+	"strconv"
 )
 
 func main() {
@@ -90,6 +93,89 @@ func run(logger *slog.Logger, args []string) error {
 			return nil
 		}
 		return err
+	case "export-key":
+		key, err := config.LoadMasterKey(cfg.MasterKeyFile)
+		if err != nil {
+			return err
+		}
+		out := os.Getenv("KEY_OUTPUT")
+		if out == "" {
+			return errors.New("KEY_OUTPUT required")
+		}
+		f, err := os.OpenFile(out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			return err
+		}
+		_, err = f.WriteString(base64.StdEncoding.EncodeToString(key))
+		closeErr := f.Close()
+		if err != nil {
+			return err
+		}
+		return closeErr
+	case "catalog-publish", "catalog-restore", "recovery-resume", "catalog-verify":
+		pool, err := database.Open(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		if err = database.Migrate(ctx, pool); err != nil {
+			return err
+		}
+		key, err := config.LoadMasterKey(cfg.MasterKeyFile)
+		if err != nil {
+			return err
+		}
+		tg := telegram.New(cfg.TelegramAPIURL)
+		if command == "catalog-verify" {
+			url := os.Getenv("RECOVERY_VERIFY_DATABASE_URL")
+			if url == "" || url == cfg.DatabaseURL {
+				return errors.New("distinct empty RECOVERY_VERIFY_DATABASE_URL required")
+			}
+			target, err := database.Open(ctx, url)
+			if err != nil {
+				return err
+			}
+			defer target.Close()
+			if err = recovery.Verify(ctx, pool, target, tg, key); err != nil {
+				return err
+			}
+			logger.Info("catalog imported and sample downloads verified")
+			return nil
+		}
+		if command == "catalog-publish" {
+			return recovery.Publish(ctx, pool, tg, key, cfg.SharedDir)
+		}
+		if command == "recovery-resume" {
+			_, err = pool.Exec(ctx, `UPDATE recovery_status SET paused=false WHERE id=1`)
+			return err
+		}
+		token := os.Getenv("RECOVERY_BOT_TOKEN")
+		if token == "" {
+			return errors.New("RECOVERY_BOT_TOKEN required")
+		}
+		path := os.Getenv("RECOVERY_FILE")
+		chatID, err := strconv.ParseInt(os.Getenv("RECOVERY_CHAT_ID"), 10, 64)
+		if err != nil {
+			return errors.New("RECOVERY_CHAT_ID required")
+		}
+		if path == "" {
+			path, err = tg.CatalogFile(ctx, token, chatID)
+			if err != nil {
+				return err
+			}
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		catalog, err := recovery.Decode(b, key)
+		if err != nil {
+			return err
+		}
+		if catalog.ChatID != chatID {
+			return errors.New("catalog belongs to another chat")
+		}
+		return recovery.Restore(ctx, pool, catalog, key, token, tg)
 	case "backup":
 		return backup(ctx, cfg, logger)
 	case "restore":
@@ -113,7 +199,7 @@ func backup(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err := runCommand(ctx, "pg_dump", "--dbname", cfg.DatabaseURL, "--format=custom", "--file", dump); err != nil {
 		return err
 	}
-	key, err := os.ReadFile(cfg.MasterKeyFile)
+	key, err := config.LoadMasterKey(cfg.MasterKeyFile)
 	if err != nil {
 		return err
 	}
@@ -158,7 +244,10 @@ func restore(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 	if err := extractArchive(archive, temp); err != nil {
 		return err
 	}
-	if err := runCommand(ctx, "pg_restore", "--dbname", cfg.DatabaseURL, "--clean", "--if-exists", "--no-owner", filepath.Join(temp, "database.dump")); err != nil {
+	if _, err := config.LoadMasterKey(filepath.Join(temp, "master.key")); err != nil {
+		return err
+	}
+	if err := runCommand(ctx, "pg_restore", "--dbname", cfg.DatabaseURL, "--single-transaction", "--exit-on-error", "--clean", "--if-exists", "--no-owner", filepath.Join(temp, "database.dump")); err != nil {
 		return err
 	}
 	key, err := os.ReadFile(filepath.Join(temp, "master.key"))

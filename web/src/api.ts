@@ -22,7 +22,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export type NodeItem = {
   id: string; parent_id: string | null; name: string; kind: 'file' | 'folder'; size: number;
-  state?: 'uploading' | 'queued' | 'processing' | 'ready' | 'failed'; error?: string;
+  state?: 'uploading' | 'queued' | 'processing' | 'syncing' | 'ready' | 'failed'; error?: string;
   progress_bytes?: number;
   file_count?: number; total_size?: number;
   created_at: string; deleted_at?: string; purge_after?: string;

@@ -108,3 +108,7 @@ docker compose config -q
 ## Лицензия
 
 [MIT](LICENSE)
+
+
+Recovery without the old database and NPM deployment: [Recovery guide](docs/RECOVERY.md).
+Automatic trash purging is temporarily disabled; trash remains recoverable.

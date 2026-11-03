@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -58,13 +59,32 @@ func (c Config) EnsureDirectories() error {
 
 func LoadMasterKey(path string) ([]byte, error) {
 	raw, err := os.ReadFile(path)
+	if value := os.Getenv("PENTARACT_MASTER_KEY"); value != "" {
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read master key: %w", err)
+		}
+		decoded, e := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
+		if e != nil || len(decoded) != 32 {
+			return nil, errors.New("PENTARACT_MASTER_KEY must be base64 of 32 bytes")
+		}
+		if err == nil {
+			existing := raw
+			if len(existing) != 32 {
+				existing, _ = base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
+			}
+			if string(existing) != string(decoded) {
+				return nil, errors.New("master key file and environment disagree")
+			}
+		}
+		return decoded, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read master key: %w", err)
 	}
 	if len(raw) == 32 {
 		return raw, nil
 	}
-	decoded, decodeErr := base64.StdEncoding.DecodeString(string(raw))
+	decoded, decodeErr := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
 	if decodeErr == nil && len(decoded) == 32 {
 		return decoded, nil
 	}

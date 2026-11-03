@@ -1,0 +1,64 @@
+# Recovery and migration
+
+Keep `data/secrets/master.key` outside the server. The key alone is insufficient for
+old installations: publish a catalog before losing the original database.
+The existing bot and channel must remain accessible. Telegram credentials, this
+key, backups and backup passwords must never be committed.
+
+## Catalog
+
+The worker publishes an encrypted snapshot after metadata changes and pins it in
+the storage channel. Grant the bot permission to edit/pin channel messages.
+`syncing` means the file is uploaded but its catalog has not been acknowledged.
+Settings displays publication status and retries. Older catalog documents remain
+in the channel. A full catalog is published each time; its cost grows with metadata.
+Automatic trash purging is currently disabled pending safe deletion review.
+
+Key source: `PENTARACT_MASTER_KEY` (base64) or `PENTARACT_MASTER_KEY_FILE` (raw or
+base64). Conflicting values fail startup. `make init` must not generate a new key
+for recovery: install the saved key first.
+
+```sh
+make catalog-publish
+make export-key KEY_OUTPUT=/data/backups/recovery-key.txt
+```
+
+Store the exported key separately from the channel. Export refuses to overwrite.
+
+## Empty installation
+
+Install the saved key in `data/secrets/master.key`, configure Telegram API ID/hash
+and PostgreSQL in `.env`, and build the same or newer compatible release. Keep the
+application stopped during import. Supply `RECOVERY_BOT_TOKEN` and
+`RECOVERY_CHAT_ID` through the environment (do not put credentials in shell history).
+
+```sh
+make catalog-restore
+```
+
+If the latest pinned message is not a catalog, download a catalog document manually,
+put it in `data/backups`, and set `RECOVERY_FILE=/data/backups/<filename>`.
+Import authenticates the catalog and checks the bot and channel. It refuses a
+nonempty database. Start the application, create a new owner and verify downloads.
+The recovered storage is read-only until `make recovery-resume`.
+Incomplete uploads and permanently deleted data are not recoverable.
+
+## Ordinary migration
+
+Use the encrypted full backup to preserve the owner, TOTP and settings. Complete
+uploads, stop writes, publish the catalog, create a full backup and keep an off-host
+copy of it and its password. Stop the old app before starting another Local Bot API
+with the same bot. Preserve the old PostgreSQL volumes and key for rollback.
+
+On homeserver-out use:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.server.yml config -q
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --build
+```
+
+The server overlay publishes no host ports. Only app joins the external `npm`
+network. Configure NPM upstream HTTP `pentaract-v2-app:8080`, HTTPS, force SSL,
+and an upload size/timeout suitable for large files. Secure cookies are enabled.
+Set `PENTARACT_PUBLIC_URL` to the actual HTTPS URL. Check port availability before
+starting any alternative local setup. Do not start the Caddy production profile.

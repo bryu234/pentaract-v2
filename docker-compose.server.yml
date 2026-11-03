@@ -1,0 +1,13 @@
+services:
+  app:
+    ports: !reset []
+    networks:
+      pentaract: {}
+      proxy:
+        aliases: [pentaract-v2-app]
+    environment:
+      PENTARACT_COOKIE_SECURE: "true"
+networks:
+  proxy:
+    external: true
+    name: npm
