@@ -93,4 +93,4 @@ func RandomToken(bytes int) (raw string, hash []byte, err error) {
 
 func TokenHash(raw string) []byte { sum := sha256.Sum256([]byte(raw)); return sum[:] }
 
-func SessionExpiry() time.Time { return time.Now().Add(30 * 24 * time.Hour) }
+func SessionExpiry() time.Time { return time.Now().Add(24 * time.Hour) }

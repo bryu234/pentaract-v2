@@ -28,11 +28,12 @@ import (
 )
 
 type Server struct {
-	DB        *pgxpool.Pool
-	Config    config.Config
-	MasterKey []byte
-	Telegram  *telegram.Client
-	Logger    *slog.Logger
+	DB         *pgxpool.Pool
+	Config     config.Config
+	MasterKey  []byte
+	LoginGuard *loginGuard
+	Telegram   *telegram.Client
+	Logger     *slog.Logger
 }
 
 type contextKey string
@@ -40,20 +41,25 @@ type contextKey string
 const sessionKey contextKey = "session"
 
 type session struct {
-	UserID uuid.UUID
-	CSRF   string
+	UserID  uuid.UUID
+	CSRF    string
+	Expires time.Time
 }
 
 func (s *Server) Handler() http.Handler {
+	if s.LoginGuard == nil {
+		s.LoginGuard = newLoginGuard()
+	}
+	g := s.LoginGuard
 	r := chi.NewRouter()
 	r.Use(recoverer(s.Logger), securityHeaders)
 	r.Get("/health/live", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]any{"status": "ok"}) })
 	r.Get("/health/ready", s.ready)
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/setup/status", s.setupStatus)
-		api.Post("/setup", s.setup)
-		api.Post("/setup/verify", s.verifySetup)
-		api.Post("/auth/login", s.login)
+		api.Post("/setup", s.protectLogin(g, s.setup))
+		api.Post("/setup/verify", s.protectLogin(g, s.verifySetup))
+		api.Post("/auth/login", s.protectLogin(g, s.login))
 		api.Get("/public/shares/info", s.publicShare)
 		api.Post("/public/shares/download", s.publicShare)
 		api.Group(func(private chi.Router) {
@@ -214,12 +220,18 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
+	key := accountKey(in.Email)
+	if blocked, wait := s.LoginGuard.accountBlocked(key); blocked {
+		rateDenied(w, wait)
+		return
+	}
 	var userID uuid.UUID
 	var passwordHash string
 	var sealed []byte
 	var enabled bool
 	err := s.DB.QueryRow(r.Context(), `SELECT id,password_hash,totp_secret_enc,totp_enabled FROM users WHERE email=$1`, strings.ToLower(strings.TrimSpace(in.Email))).Scan(&userID, &passwordHash, &sealed, &enabled)
 	if err != nil || !enabled || !auth.VerifyPassword(passwordHash, in.Password) {
+		s.LoginGuard.failure(key)
 		time.Sleep(300 * time.Millisecond)
 		problem(w, 401, "invalid credentials")
 		return
@@ -227,13 +239,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	secret, err := cryptostore.OpenSecret(s.MasterKey, sealed)
 	valid := err == nil && auth.ValidateTOTP(in.Code, string(secret))
 	if !valid {
-		hash := sha256.Sum256([]byte(strings.ToUpper(in.Code)))
-		valid = s.DB.QueryRow(r.Context(), `UPDATE recovery_codes SET used_at=now() WHERE id=(SELECT id FROM recovery_codes WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL LIMIT 1) RETURNING true`, userID, hash[:]).Scan(&valid) == nil && valid
+		valid = s.consumeRecoveryCode(r.Context(), userID, in.Code)
 	}
 	if !valid {
+		s.LoginGuard.failure(key)
 		problem(w, 401, "invalid second factor")
 		return
 	}
+	s.LoginGuard.reset(key)
 	csrf, err := s.createSession(w, r, userID)
 	if err != nil {
 		problem(w, 500, "cannot create session")
@@ -268,7 +281,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 		var sess session
-		err = s.DB.QueryRow(r.Context(), `SELECT user_id,csrf_token FROM sessions WHERE token_hash=$1 AND expires_at>now()`, auth.TokenHash(cookie.Value)).Scan(&sess.UserID, &sess.CSRF)
+		err = s.DB.QueryRow(r.Context(), `SELECT user_id,csrf_token,LEAST(expires_at,created_at+interval '24 hours') FROM sessions WHERE token_hash=$1 AND expires_at>now() AND created_at+interval '24 hours'>now()`, auth.TokenHash(cookie.Value)).Scan(&sess.UserID, &sess.CSRF, &sess.Expires)
 		if err != nil {
 			problem(w, 401, "session expired")
 			return
@@ -294,7 +307,7 @@ func (s *Server) currentSession(w http.ResponseWriter, r *http.Request) {
 	sess := r.Context().Value(sessionKey).(session)
 	var email string
 	_ = s.DB.QueryRow(r.Context(), `SELECT email FROM users WHERE id=$1`, sess.UserID).Scan(&email)
-	writeJSON(w, 200, map[string]string{"email": email, "csrf_token": sess.CSRF})
+	writeJSON(w, 200, map[string]any{"email": email, "csrf_token": sess.CSRF, "expires_at": sess.Expires})
 }
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	cookie, _ := r.Cookie("pv2_session")
@@ -1024,6 +1037,7 @@ func problem(w http.ResponseWriter, status int, message string) {
 }
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -1043,4 +1057,11 @@ func recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func (s *Server) consumeRecoveryCode(ctx context.Context, userID uuid.UUID, code string) bool {
+	hash := sha256.Sum256([]byte(strings.ToUpper(code)))
+	var consumed bool
+	err := s.DB.QueryRow(ctx, `UPDATE recovery_codes SET used_at=now() WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL RETURNING true`, userID, hash[:]).Scan(&consumed)
+	return err == nil && consumed
 }

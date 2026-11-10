@@ -2,13 +2,13 @@ import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { CloudDoneOutlined, Sync, SyncProblemOutlined, PauseCircleOutline, ShareOutlined, Add, ArrowForwardIos, CloudUpload, DeleteOutline, Download, DriveFileMoveOutlined, FolderOutlined, GridView, InfoOutlined, InsertDriveFileOutlined, Logout, Restore, Search, Settings as SettingsIcon, ShieldOutlined } from '@mui/icons-material'
-import { api, formatBytes, NodeItem, progressPercent, setCSRF, uploadFile } from './api'
+import { api, formatBytes, NodeItem, progressPercent, setCSRF, uploadFile, scheduleSessionExpiry } from './api'
 import './styles.css'
 import {ShareDialog,SharedFilePage} from './shares'
 
 const queryClient = new QueryClient()
 
-type Session = { email: string; csrf_token: string }
+type Session = { email: string; csrf_token: string; expires_at:string }
 type TelegramConfig = { configured: boolean; storage_name?: string; chat_id?: number; bot_username?: string }
 
 function Brand() { return <span className="brand"><span className="brand-mark">P</span><span className="brand-name">Pentaract</span></span> }
@@ -23,6 +23,7 @@ function App() {
 function OwnerApp(){
   const setup = useQuery({queryKey:['setup'],queryFn:()=>api<{configured:boolean}>('/setup/status')})
   const session = useQuery({queryKey:['session'],queryFn:async()=>{const value=await api<Session>('/auth/session');setCSRF(value.csrf_token);return value},retry:false,enabled:setup.data?.configured===true})
+  useEffect(()=>{if(!session.data?.expires_at)return;return scheduleSessionExpiry(session.data.expires_at)},[session.data?.expires_at])
   if(setup.isLoading||session.isLoading) return <div className="loading">Загрузка Pentaract…</div>
   if(setup.isError) return <div className="loading" role="alert">Не удалось проверить настройки приложения.</div>
   if(!setup.data?.configured) return <Setup onDone={()=>{setup.refetch();session.refetch()}}/>
@@ -38,8 +39,8 @@ function Setup({onDone}:{onDone:()=>void}) {
 }
 
 function Login({onDone}:{onDone:()=>void}) {
-  const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[code,setCode]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false)
-  const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);try{setError('');const result=await api<{csrf_token:string}>('/auth/login',{method:'POST',body:JSON.stringify({email,password,code})});setCSRF(result.csrf_token);onDone()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
+  const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[code,setCode]=useState('');const[error,setError]=useState(()=>sessionStorage.getItem('pv2_expired')?'Сессия истекла. Войдите снова.':'');const[busy,setBusy]=useState(false)
+  const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);try{setError('');const result=await api<{csrf_token:string}>('/auth/login',{method:'POST',body:JSON.stringify({email,password,code})});sessionStorage.removeItem('pv2_expired');setCSRF(result.csrf_token);onDone()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
   return <div className="login-shell"><aside className="login-story"><Brand/><div className="login-copy"><span className="eyebrow">Личное хранилище</span><h1>Ваши файлы.<br/>Ваш порядок.</h1><p>Спокойное пространство для файлов, папок и понятного контроля загрузки.</p></div><div className="login-steps"><div className="login-step"><span className="login-step-number">01</span>Откройте личное пространство</div><div className="login-step"><span className="login-step-number">02</span>Найдите нужный файл или загрузите новый</div><div className="login-step"><span className="login-step-number">03</span>Следите за этапами отправки</div></div></aside><main className="login-form-side"><div className="login-card"><span className="eyebrow">С возвращением</span><h2>Вход в Pentaract</h2><p className="lead">Введите данные своей учётной записи.</p><form className="login-form" onSubmit={submit}>{error&&<div className="login-summary" role="alert">{error}</div>}<div className="login-field"><label className="field-label" htmlFor="login-email">Email</label><input className="field" id="login-email" type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} required/></div><div className="login-field"><label className="field-label" htmlFor="login-password">Пароль</label><input className="field" id="login-password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></div><div className="login-field"><label className="field-label" htmlFor="login-code">Код TOTP или восстановления</label><input className="field" id="login-code" autoComplete="one-time-code" value={code} onChange={e=>setCode(e.target.value)} required/></div><button className="btn btn-primary login-submit" type="submit" disabled={busy}>{busy?'Входим…':'Войти'} <ArrowForwardIos/></button></form></div></main></div>
 }
 

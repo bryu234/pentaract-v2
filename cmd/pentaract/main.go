@@ -259,7 +259,23 @@ func restore(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 	if _, err := config.LoadMasterKey(filepath.Join(temp, "master.key")); err != nil {
 		return err
 	}
-	if err := runCommand(ctx, "pg_restore", "--dbname", cfg.DatabaseURL, "--single-transaction", "--exit-on-error", "--clean", "--if-exists", "--no-owner", filepath.Join(temp, "database.dump")); err != nil {
+	sqlPath := filepath.Join(temp, "restore.sql")
+	if err := runCommand(ctx, "pg_restore", "--clean", "--if-exists", "--no-owner", "--file", sqlPath, filepath.Join(temp, "database.dump")); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(sqlPath, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString("\nDELETE FROM public.sessions;\nDO $$ BEGIN IF to_regclass('public.file_shares') IS NOT NULL THEN UPDATE public.file_shares SET revoked_at=now(); END IF; END $$;\n")
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err := runCommand(ctx, "psql", "--dbname", cfg.DatabaseURL, "--single-transaction", "--set", "ON_ERROR_STOP=on", "--file", sqlPath); err != nil {
 		return err
 	}
 	key, err := os.ReadFile(filepath.Join(temp, "master.key"))
@@ -268,14 +284,6 @@ func restore(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 	}
 	if err := os.WriteFile(cfg.MasterKeyFile, key, 0o600); err != nil {
 		return err
-	}
-	pool, e := database.Open(ctx, cfg.DatabaseURL)
-	if e != nil {
-		return e
-	}
-	defer pool.Close()
-	if _, e = pool.Exec(ctx, `DO $$ BEGIN IF to_regclass('public.file_shares') IS NOT NULL THEN UPDATE file_shares SET revoked_at=now(); END IF; END $$`); e != nil {
-		return e
 	}
 	logger.Info("backup restored", "source", input)
 	return nil

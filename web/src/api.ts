@@ -7,11 +7,24 @@ export function setCSRF(value: string) {
   else storage?.removeItem('pv2_csrf')
 }
 
+export function expireSession() {
+ if (!csrfToken) return
+ setCSRF('')
+ sessionStorage.setItem('pv2_expired','1')
+ location.reload()
+}
+
+export function scheduleSessionExpiry(expires:string) {
+ const timer=setTimeout(expireSession,Math.max(0,new Date(expires).getTime()-Date.now()))
+ return ()=>clearTimeout(timer)
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !(init.body instanceof Blob) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   if (!['GET', 'HEAD'].includes((init.method ?? 'GET').toUpperCase()) && csrfToken) headers.set('X-CSRF-Token', csrfToken)
   const response = await fetch(`/api/v1${path}`, { ...init, headers, credentials: 'same-origin' })
+  if (response.status===401 && path!=='/auth/login') expireSession()
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: response.statusText }))
     throw new Error(body.error ?? `HTTP ${response.status}`)
@@ -71,6 +84,7 @@ export async function uploadFile(file: File, parentId: string | null, onProgress
       method: 'PATCH', credentials: 'same-origin', body: part,
       headers: { 'Upload-Offset': String(offset), 'Content-Type': 'application/offset+octet-stream', 'X-CSRF-Token': csrfToken },
     })
+    if(response.status===401) expireSession()
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? 'Upload failed')
     offset = Number(response.headers.get('Upload-Offset') ?? offset + part.size)
     onProgress(file.size ? offset / file.size : 1)

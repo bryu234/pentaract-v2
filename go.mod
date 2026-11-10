@@ -1,6 +1,6 @@
 module github.com/bryu234/pentaract-v2
 
-go 1.24
+go 1.27.0
 
 require (
 	filippo.io/age v1.2.1

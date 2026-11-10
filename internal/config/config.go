@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 )
 
 type Config struct {
+	TrustedProxyCIDRs []netip.Prefix
 	DatabaseURL       string
 	ListenAddress     string
 	DataDir           string
@@ -34,6 +36,17 @@ func Load() (Config, error) {
 		PublicURL:      env("PENTARACT_PUBLIC_URL", "http://localhost:8088"),
 		CookieSecure:   envBool("PENTARACT_COOKIE_SECURE", false),
 		TelegramAPIURL: env("PENTARACT_TELEGRAM_API_URL", "http://telegram-bot-api:8081"),
+	}
+	for _, value := range strings.Split(os.Getenv("PENTARACT_TRUSTED_PROXY_CIDRS"), ",") {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		prefix, e := netip.ParsePrefix(value)
+		if e != nil {
+			return Config{}, errors.New("invalid PENTARACT_TRUSTED_PROXY_CIDRS")
+		}
+		c.TrustedProxyCIDRs = append(c.TrustedProxyCIDRs, prefix)
 	}
 	days, err := envInt("PENTARACT_TRASH_RETENTION_DAYS", 30)
 	if err != nil || days < 1 {

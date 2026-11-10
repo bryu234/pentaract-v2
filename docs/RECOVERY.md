@@ -84,3 +84,20 @@ The public URL uses a fragment token so NPM request URLs do not contain it.
 Set `PENTARACT_PUBLIC_URL` to the actual HTTPS origin.
 Links are excluded from Telegram recovery catalogs. Full database restoration
 revokes all restored links; normal application updates preserve them.
+
+## Authentication lifetime and limits
+
+Owner sessions expire 24 hours after login; activity does not extend them. Existing
+sessions are capped at their creation time plus 24 hours on upgrade. Full backup
+restoration clears sessions and revokes links in the same database transaction.
+Passwords, TOTP secrets and file keys remain unchanged.
+
+Authentication endpoints allow 10 attempts per source per minute and at most two
+simultaneous password checks. Five failed logins for an account block attempts
+for the remainder of a 15-minute window; rejected requests do not extend it.
+Limits return HTTP 429 with Retry-After. Counters are bounded in process memory
+and reset on application restart.
+
+Set PENTARACT_TRUSTED_PROXY_CIDRS to the exact NPM address (e.g. 172.18.0.2/32).
+Only that peer may provide X-Real-IP. Other forwarded headers are ignored. Recheck
+this address if NPM is recreated. Empty configuration trusts no proxy.
