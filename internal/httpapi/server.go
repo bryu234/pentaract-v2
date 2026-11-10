@@ -60,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 		api.Post("/setup", s.protectLogin(g, s.setup))
 		api.Post("/setup/verify", s.protectLogin(g, s.verifySetup))
 		api.Post("/auth/login", s.protectLogin(g, s.login))
+		api.Post("/auth/password", s.protectLogin(g, s.verifyPassword))
 		api.Get("/public/shares/info", s.publicShare)
 		api.Post("/public/shares/download", s.publicShare)
 		api.Group(func(private chi.Router) {

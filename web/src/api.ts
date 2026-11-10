@@ -10,7 +10,6 @@ export function setCSRF(value: string) {
 export function expireSession() {
  if (!csrfToken) return
  setCSRF('')
- sessionStorage.setItem('pv2_expired','1')
  location.reload()
 }
 
@@ -24,7 +23,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !(init.body instanceof Blob) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   if (!['GET', 'HEAD'].includes((init.method ?? 'GET').toUpperCase()) && csrfToken) headers.set('X-CSRF-Token', csrfToken)
   const response = await fetch(`/api/v1${path}`, { ...init, headers, credentials: 'same-origin' })
-  if (response.status===401 && path!=='/auth/login') expireSession()
+  if (response.status===401 && path!=='/auth/login' && path!=='/auth/password') expireSession()
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: response.statusText }))
     throw new Error(body.error ?? `HTTP ${response.status}`)
