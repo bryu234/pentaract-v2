@@ -48,13 +48,16 @@ func Load() (Config, error) {
 		}
 		c.TrustedProxyCIDRs = append(c.TrustedProxyCIDRs, prefix)
 	}
-	days, err := envInt("PENTARACT_TRASH_RETENTION_DAYS", 30)
+	days, err := envInt("PENTARACT_TRASH_RETENTION_DAYS", 3)
 	if err != nil || days < 1 {
 		return Config{}, errors.New("PENTARACT_TRASH_RETENTION_DAYS must be a positive integer")
 	}
 	chunkMiB, err := envInt("PENTARACT_TELEGRAM_CHUNK_MIB", 256)
 	if err != nil || chunkMiB < 1 || chunkMiB > 1900 {
 		return Config{}, errors.New("PENTARACT_TELEGRAM_CHUNK_MIB must be between 1 and 1900")
+	}
+	if days > 3 {
+		days = 3
 	}
 	c.TrashRetention = time.Duration(days) * 24 * time.Hour
 	c.TelegramChunkSize = int64(chunkMiB) * 1024 * 1024

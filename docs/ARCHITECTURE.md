@@ -17,7 +17,7 @@
 - Telegram 429: the exact `retry_after` delay is honored.
 - Network/5xx error: bounded retries are used. A response lost after Telegram accepts a document can leave an orphan channel message; captions contain an opaque chunk UUID for audit.
 - Integrity failure: download stops; corrupted plaintext is never emitted for the affected frame.
-- Delete: metadata remains recoverable for 30 days. Remote Telegram deletion at purge time is best effort.
+- Delete: metadata remains recoverable in trash for 72 hours. Expired subtrees are pruned once per minute and schedule a recovery catalog update. Telegram messages are retained; no remote deletion is performed. The retention setting defaults to 3 days and is capped at 3 days, including existing trash entries.
 
 ## Deliberate V1 boundaries
 

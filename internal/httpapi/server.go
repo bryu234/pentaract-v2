@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -662,20 +661,20 @@ func (s *Server) restoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 	var parent *uuid.UUID
 	var oldName string
-	if err := s.DB.QueryRow(r.Context(), `SELECT parent_id,name FROM nodes WHERE id=$1 AND deleted_at IS NOT NULL`, id).Scan(&parent, &oldName); err != nil {
+	if err := s.DB.QueryRow(r.Context(), `SELECT parent_id,name FROM nodes WHERE id=$1 AND deleted_at IS NOT NULL AND purge_after>now()`, id).Scan(&parent, &oldName); err != nil {
 		problem(w, 404, "trash item not found")
 		return
 	}
 	name, _ := s.uniqueNameExcluding(r.Context(), parent, oldName, id)
-	n, err := scanNode(s.DB.QueryRow(r.Context(), `UPDATE nodes SET name=$2,deleted_at=NULL,purge_after=NULL,updated_at=now() WHERE id=$1 RETURNING `+nodeColumns, id, name))
+	n, err := scanNode(s.DB.QueryRow(r.Context(), `UPDATE nodes SET name=$2,deleted_at=NULL,purge_after=NULL,updated_at=now() WHERE id=$1 AND deleted_at IS NOT NULL AND purge_after>now() RETURNING `+nodeColumns, id, name))
 	if err != nil {
-		problem(w, 500, "cannot restore")
+		problem(w, 404, "trash item not found")
 		return
 	}
 	writeJSON(w, 200, n)
 }
 func (s *Server) listTrash(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.DB.Query(r.Context(), `SELECT `+nodeColumns+` FROM nodes WHERE deleted_at IS NOT NULL AND (parent_id IS NULL OR NOT EXISTS(SELECT 1 FROM nodes p WHERE p.id=nodes.parent_id AND p.deleted_at IS NOT NULL)) ORDER BY deleted_at DESC`)
+	rows, err := s.DB.Query(r.Context(), `SELECT `+nodeColumns+` FROM nodes WHERE deleted_at IS NOT NULL AND purge_after>now() AND (parent_id IS NULL OR NOT EXISTS(SELECT 1 FROM nodes p WHERE p.id=nodes.parent_id AND p.deleted_at IS NOT NULL)) ORDER BY deleted_at DESC`)
 	if err != nil {
 		problem(w, 500, "database error")
 		return
@@ -843,97 +842,6 @@ func (s *Server) retryUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 202, map[string]string{"status": "queued"})
 }
 
-func (s *Server) download(w http.ResponseWriter, r *http.Request) {
-	nodeID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		problem(w, 400, "invalid file id")
-		return
-	}
-	s.downloadNode(w, r, nodeID)
-}
-
-func (s *Server) downloadNode(w http.ResponseWriter, r *http.Request, nodeID uuid.UUID) {
-	var name string
-	var size int64
-	var wrapped []byte
-	err := s.DB.QueryRow(r.Context(), `SELECT name,size,wrapped_key FROM nodes WHERE id=$1 AND kind='file' AND state='ready' AND NOT recovery_pending AND deleted_at IS NULL`, nodeID).Scan(&name, &size, &wrapped)
-	if err != nil {
-		problem(w, 404, "ready file not found")
-		return
-	}
-	key, err := cryptostore.OpenSecret(s.MasterKey, wrapped)
-	if err != nil {
-		problem(w, 500, "cannot decrypt file key")
-		return
-	}
-	start, end, partial, err := parseRange(r.Header.Get("Range"), size)
-	if err != nil {
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
-		problem(w, 416, err.Error())
-		return
-	}
-	var tokenEnc []byte
-	if err := s.DB.QueryRow(r.Context(), `SELECT bot_token_enc FROM telegram_settings WHERE id=1`).Scan(&tokenEnc); err != nil {
-		problem(w, 503, "Telegram is not configured")
-		return
-	}
-	tokenBytes, err := cryptostore.OpenSecret(s.MasterKey, tokenEnc)
-	if err != nil {
-		problem(w, 500, "cannot decrypt bot token")
-		return
-	}
-	rows, err := s.DB.Query(r.Context(), `SELECT position,plain_offset,telegram_file_id,cipher_hash FROM file_chunks WHERE node_id=$1 AND plain_offset+plain_size>$2 AND plain_offset<=$3 ORDER BY position`, nodeID, start, end)
-	if err != nil {
-		problem(w, 500, "cannot list chunks")
-		return
-	}
-	defer rows.Close()
-	type chunk struct {
-		position int
-		offset   int64
-		fileID   string
-		hash     []byte
-	}
-	var chunks []chunk
-	for rows.Next() {
-		var c chunk
-		if rows.Scan(&c.position, &c.offset, &c.fileID, &c.hash) == nil {
-			chunks = append(chunks, c)
-		}
-	}
-	if len(chunks) == 0 && size > 0 {
-		problem(w, 500, "file chunks are missing")
-		return
-	}
-	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": name})
-	w.Header().Set("Content-Disposition", disposition)
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
-	if partial {
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
-		w.WriteHeader(206)
-	}
-	for _, c := range chunks {
-		path, err := s.Telegram.ResolveFile(r.Context(), string(tokenBytes), c.fileID)
-		if err != nil {
-			s.Logger.Error("resolve Telegram file", "error", err)
-			return
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			s.Logger.Error("open Telegram file", "error", err)
-			return
-		}
-		err = cryptostore.DecryptChunk(file, w, key, nodeID, c.position, c.hash, c.offset, start, end)
-		file.Close()
-		if err != nil {
-			s.Logger.Error("decrypt Telegram chunk", "error", err)
-			return
-		}
-	}
-}
-
 func (s *Server) uniqueName(ctx context.Context, parent *uuid.UUID, name string) (string, error) {
 	return s.uniqueNameExcluding(ctx, parent, name, uuid.Nil)
 }
@@ -1051,6 +959,9 @@ func recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if value := recover(); value != nil {
+					if value == http.ErrAbortHandler {
+						panic(value)
+					}
 					logger.Error("HTTP panic", "panic", value)
 					problem(w, 500, "internal server error")
 				}

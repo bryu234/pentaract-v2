@@ -34,7 +34,7 @@ type telegramConfig struct {
 
 func (p *Processor) Run(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
-	trashTicker := time.NewTicker(time.Hour)
+	trashTicker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	defer trashTicker.Stop()
 	for {
@@ -52,10 +52,11 @@ func (p *Processor) Run(ctx context.Context) {
 			}
 			p.processNext(ctx)
 		case <-trashTicker.C:
-			// Remote purge is deferred until a durable tombstone publication is implemented.
+			// Prune catalog entries only. Telegram messages are deliberately retained.
 			var paused bool
 			if err := p.DB.QueryRow(ctx, `SELECT paused FROM recovery_status WHERE id=1`).Scan(&paused); err == nil && !paused {
 				p.cleanupExpiredUploads(ctx)
+				p.purgeTrash(ctx)
 			}
 		}
 	}
@@ -216,35 +217,73 @@ func (p *Processor) telegramSettings(ctx context.Context) (telegramConfig, error
 }
 
 func (p *Processor) purgeTrash(ctx context.Context) {
-	settings, settingsErr := p.telegramSettings(ctx)
-	rows, err := p.DB.Query(ctx, `SELECT id FROM nodes WHERE deleted_at IS NOT NULL AND purge_after <= now() ORDER BY purge_after LIMIT 100`)
+	// Lock nodes before recovery_status, matching the mutation triggers' lock order.
+	tx, err := p.DB.Begin(ctx)
 	if err != nil {
-		p.Logger.Error("list trash", "error", err)
 		return
 	}
-	defer rows.Close()
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `LOCK TABLE nodes IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return
+	}
+	var paused bool
+	if err = tx.QueryRow(ctx, `SELECT paused FROM recovery_status WHERE id=1 FOR UPDATE`).Scan(&paused); err != nil || paused {
+		return
+	}
+	rows, err := tx.Query(ctx, `SELECT id FROM nodes WHERE deleted_at IS NOT NULL AND purge_after<=now() ORDER BY purge_after LIMIT 100`)
+	if err != nil {
+		return
+	}
 	var ids []uuid.UUID
 	for rows.Next() {
 		var id uuid.UUID
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return
 		}
+		ids = append(ids, id)
 	}
-	for _, id := range ids {
-		if settingsErr == nil {
-			messageRows, _ := p.DB.Query(ctx, `WITH RECURSIVE tree AS (SELECT id FROM nodes WHERE id=$1 UNION ALL SELECT n.id FROM nodes n JOIN tree t ON n.parent_id=t.id) SELECT telegram_message_id FROM file_chunks WHERE node_id IN (SELECT id FROM tree)`, id)
-			if messageRows != nil {
-				for messageRows.Next() {
-					var messageID int64
-					if messageRows.Scan(&messageID) == nil {
-						_ = p.Telegram.DeleteMessage(ctx, settings.Token, settings.ChatID, messageID)
-					}
-				}
-				messageRows.Close()
+	err = rows.Err()
+	rows.Close()
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	const tree = `WITH RECURSIVE tree AS (SELECT id FROM nodes WHERE id=ANY($1::uuid[]) UNION SELECT n.id FROM nodes n JOIN tree t ON n.parent_id=t.id) `
+	uploadRows, err := tx.Query(ctx, tree+`SELECT temp_path FROM upload_sessions WHERE node_id IN (SELECT id FROM tree)`, ids)
+	if err != nil {
+		return
+	}
+	var paths []string
+	for uploadRows.Next() {
+		var path string
+		if err = uploadRows.Scan(&path); err != nil {
+			break
+		}
+		paths = append(paths, path)
+	}
+	if err == nil {
+		err = uploadRows.Err()
+	}
+	uploadRows.Close()
+	if err != nil {
+		return
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM nodes WHERE id=ANY($1::uuid[])`, ids)
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	if err != nil {
+		p.Logger.Error("purge expired trash", "error", err)
+		return
+	}
+	for _, path := range paths {
+		if filepath.Dir(filepath.Clean(path)) == filepath.Join(p.Config.DataDir, "uploads") {
+			if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
+				p.Logger.Warn("remove trashed upload")
 			}
 		}
-		_, _ = p.DB.Exec(ctx, `DELETE FROM nodes WHERE id=$1`, id)
 	}
+
 }
 
 func safeError(err error) string {

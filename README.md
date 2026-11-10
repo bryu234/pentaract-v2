@@ -16,7 +16,7 @@ Encrypted personal file storage backed by a private Telegram channel and a self-
 - XChaCha20-Poly1305 encryption before Telegram upload
 - 256 MiB Telegram chunks, configurable up to 1900 MiB
 - Password, TOTP, recovery codes and server-side sessions
-- Folders, search, byte-range downloads and 30-day trash
+- Folders, ZIP folder downloads, search, byte-range file downloads and 3-day trash
 - Encrypted portable backup of PostgreSQL and the master key
 
 ## Requirements
@@ -111,4 +111,4 @@ Architecture details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 
 Recovery without the old database and NPM deployment: [Recovery guide](docs/RECOVERY.md).
-Automatic trash purging is temporarily disabled; trash remains recoverable.
+Trash expires after 72 hours. Expired catalog entries are removed automatically; encrypted Telegram messages are retained.

@@ -12,7 +12,7 @@ the storage channel. Grant the bot permission to edit/pin channel messages.
 `syncing` means the file is uploaded but its catalog has not been acknowledged.
 Settings displays publication status and retries. Older catalog documents remain
 in the channel. A full catalog is published each time; its cost grows with metadata.
-Automatic trash purging is currently disabled pending safe deletion review.
+Trash expires after 72 hours. Expired metadata is removed from the database and the next recovery catalog. Telegram messages are not deleted; older backups/catalogs may still reference them. Storage recovered in read-only mode is never purged until explicitly resumed.
 
 Key source: `PENTARACT_MASTER_KEY` (base64) or `PENTARACT_MASTER_KEY_FILE` (raw or
 base64). Conflicting values fail startup. `make init` must not generate a new key
