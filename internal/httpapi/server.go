@@ -54,6 +54,8 @@ func (s *Server) Handler() http.Handler {
 		api.Post("/setup", s.setup)
 		api.Post("/setup/verify", s.verifySetup)
 		api.Post("/auth/login", s.login)
+		api.Get("/public/shares/info", s.publicShare)
+		api.Post("/public/shares/download", s.publicShare)
 		api.Group(func(private chi.Router) {
 			private.Use(s.authenticate, s.csrf)
 			private.Use(func(next http.Handler) http.Handler {
@@ -86,6 +88,9 @@ func (s *Server) Handler() http.Handler {
 			})
 			private.Get("/settings/telegram", s.getTelegramSettings)
 			private.Put("/settings/telegram", s.putTelegramSettings)
+			private.Post("/files/{id}/shares", s.createShare)
+			private.Get("/files/{id}/shares", s.listShares)
+			private.Delete("/shares/{id}", s.revokeShare)
 			private.Get("/files", s.listFiles)
 			private.Get("/folders", s.listFolders)
 			private.Post("/folders", s.createFolder)
@@ -830,10 +835,14 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "invalid file id")
 		return
 	}
+	s.downloadNode(w, r, nodeID)
+}
+
+func (s *Server) downloadNode(w http.ResponseWriter, r *http.Request, nodeID uuid.UUID) {
 	var name string
 	var size int64
 	var wrapped []byte
-	err = s.DB.QueryRow(r.Context(), `SELECT name,size,wrapped_key FROM nodes WHERE id=$1 AND kind='file' AND state='ready' AND NOT recovery_pending AND deleted_at IS NULL`, nodeID).Scan(&name, &size, &wrapped)
+	err := s.DB.QueryRow(r.Context(), `SELECT name,size,wrapped_key FROM nodes WHERE id=$1 AND kind='file' AND state='ready' AND NOT recovery_pending AND deleted_at IS NULL`, nodeID).Scan(&name, &size, &wrapped)
 	if err != nil {
 		problem(w, 404, "ready file not found")
 		return

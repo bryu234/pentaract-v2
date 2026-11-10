@@ -269,6 +269,14 @@ func restore(ctx context.Context, cfg config.Config, logger *slog.Logger) error 
 	if err := os.WriteFile(cfg.MasterKeyFile, key, 0o600); err != nil {
 		return err
 	}
+	pool, e := database.Open(ctx, cfg.DatabaseURL)
+	if e != nil {
+		return e
+	}
+	defer pool.Close()
+	if _, e = pool.Exec(ctx, `DO $$ BEGIN IF to_regclass('public.file_shares') IS NOT NULL THEN UPDATE file_shares SET revoked_at=now(); END IF; END $$`); e != nil {
+		return e
+	}
 	logger.Info("backup restored", "source", input)
 	return nil
 }

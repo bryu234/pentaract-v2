@@ -72,3 +72,15 @@ starting any alternative local setup. Do not start the Caddy production profile.
 For a verification import into a disposable empty PostgreSQL database, use
 `pentaract catalog-verify` with `RECOVERY_VERIFY_DATABASE_URL`. It downloads only
 the two smallest files of at most 5 MiB each and compares their checksums.
+
+## Shared download links
+
+Ready files support expiring links (15 minutes, 1 hour, 24 hours or 7 days).
+One-time links are consumed atomically when a download starts; interrupted or failed
+transfers require a new link. Previews do not consume links. The owner can copy or
+revoke links in the Share dialog. Trashing a file or ancestor folder revokes its
+links permanently. Active transfers are not interrupted by expiration/revocation.
+The public URL uses a fragment token so NPM request URLs do not contain it.
+Set `PENTARACT_PUBLIC_URL` to the actual HTTPS origin.
+Links are excluded from Telegram recovery catalogs. Full database restoration
+revokes all restored links; normal application updates preserve them.

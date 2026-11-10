@@ -18,6 +18,9 @@ func Handler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		if r.URL.Path == "/s/" {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		if path != "" {
 			if file, err := dist.Open(path); err == nil {
