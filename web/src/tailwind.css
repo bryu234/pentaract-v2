@@ -1,0 +1,4 @@
+/* Utilities only: retain the application's existing base styles instead of Preflight. */
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css";
+@source "./components/ui";

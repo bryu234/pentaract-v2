@@ -101,3 +101,13 @@ and reset on application restart.
 Set PENTARACT_TRUSTED_PROXY_CIDRS to the exact NPM address (e.g. 172.18.0.2/32).
 Only that peer may provide X-Real-IP. Other forwarded headers are ignored. Recheck
 this address if NPM is recreated. Empty configuration trusts no proxy.
+
+## Frontend UI components
+
+The Vite/TypeScript frontend lives in `web/`. Reusable shadcn-style components
+belong in `web/src/components/ui`, imported as `@/components/ui/...`; the alias
+points to `web/src`, so a repository-root `components/ui` would be outside the app.
+`web/components.json` configures this convention and `@/lib/utils` provides `cn`.
+Tailwind is connected through `@tailwindcss/vite` and `src/tailwind.css`; Preflight
+is intentionally omitted to preserve the existing application styles. Install the
+locked dependencies with `npm ci` in `web/` and use `npm run build` to validate.

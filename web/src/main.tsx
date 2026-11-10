@@ -3,7 +3,9 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { CloudDoneOutlined, Sync, SyncProblemOutlined, PauseCircleOutline, ShareOutlined, Add, ArrowForwardIos, CloudUpload, DeleteOutline, Download, DriveFileMoveOutlined, FolderOutlined, GridView, InfoOutlined, InsertDriveFileOutlined, Logout, Restore, Search, Settings as SettingsIcon, ShieldOutlined } from '@mui/icons-material'
 import { api, formatBytes, NodeItem, progressPercent, setCSRF, uploadFile, scheduleSessionExpiry } from './api'
+import './tailwind.css'
 import './styles.css'
+import {FlowButton} from '@/components/ui/flow-button'
 import {ShareDialog,SharedFilePage} from './shares'
 
 const queryClient = new QueryClient()
@@ -50,7 +52,8 @@ function Login({onDone}:{onDone:()=>void}) {
  return <main className="auth-page"><section className={`auth-card ${success?'auth-complete':''}`} aria-label="Вход в Pentaract"><Brand/><div className={`auth-stage ${leaving?'auth-stage-leaving':''}`} key={step}><h1>{step==='password'?'Вход в Pentaract':'Подтвердите вход'}</h1><p className="auth-description">{step==='password'?'Введите логин и пароль.':'Введите код из приложения аутентификации или код восстановления.'}</p><form className="login-form" onSubmit={submit} aria-busy={busy}>
  {error&&<div className="login-summary" role="alert">{error}</div>}
  {step==='password'?<><div className="login-field"><label className="field-label" htmlFor="login-email">Логин</label><input autoFocus className="field" id="login-email" type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} disabled={busy} required/></div><div className="login-field"><label className="field-label" htmlFor="login-password">Пароль</label><input className="field" id="login-password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} disabled={busy} required/></div></>:<div className="login-field"><label className="field-label" htmlFor="login-code">Код подтверждения</label><input autoFocus className="field auth-code" id="login-code" autoComplete="one-time-code" value={code} onChange={e=>setCode(e.target.value)} disabled={busy} required/></div>}
- <button className={`btn btn-primary login-submit auth-submit ${busy?'auth-submit-busy':''}`} type="submit" disabled={busy}><span>{success?'Готово':busy?'Проверяем…':step==='password'?'Войти':'Подтвердить'}</span>{busy&&!success?<span className="auth-spinner" aria-hidden="true"/>:<ArrowForwardIos className="auth-arrow"/>}</button>
+ <FlowButton type="submit" className="w-full min-h-[50px]" text={success?'Готово':busy?'Проверяем…':step==='password'?'Войти':'Подтвердить'} loading={busy&&!success} disabled={busy}/>
+
  {step==='otp'&&<button className="auth-back" type="button" disabled={busy} onClick={()=>{setPassword('');void transition('password')}}>Назад к паролю</button>}
  </form></div></section></main>
 }
