@@ -97,7 +97,7 @@ func migrationCommand(ctx context.Context, c config.Config, l *slog.Logger, comm
 		l.Info("database backup created", "path", out)
 		return migrationOwner(out)
 	}
-	if command == "migration-export" {
+	if command == "migration-export" || command == "migration-check" {
 		db, e := database.Open(ctx, c.DatabaseURL)
 		if e != nil {
 			return e
@@ -109,6 +109,9 @@ func migrationCommand(ctx context.Context, c config.Config, l *slog.Logger, comm
 		}
 		if busy {
 			return errors.New("finish or remove incomplete uploads before migration")
+		}
+		if command == "migration-check" {
+			return nil
 		}
 		if _, e = os.Stat(dir); !os.IsNotExist(e) {
 			return errors.New("migration output already exists")

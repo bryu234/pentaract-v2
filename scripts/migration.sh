@@ -9,6 +9,7 @@ export|handoff)
  running=$(docker compose ps --status running --services | sed -n '/^app$/p')
  restore_app() { if [ -n "$running" ]; then docker compose start app; fi; }
  trap restore_app EXIT
+ docker compose run --rm --no-deps app migration-check
  if [ -n "$running" ]; then docker compose stop app; fi
  stamp=$(date -u +%Y%m%dT%H%M%SZ)
  mkdir -p data/backups
