@@ -4,7 +4,7 @@ HTTP_PORT := $(shell awk -F= '$$1 == "PENTARACT_HTTP_PORT" {print $$2; exit}' .e
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor check-ports check-production-ports init up prod-up down restart ps logs build test lint migrate backup restore clean
+.PHONY: backup-db migration-export migration-handoff migration-restore export-key help doctor check-ports check-production-ports init up prod-up down restart ps logs build test lint migrate backup restore clean
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "; print "Pentaract V2 commands:"} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -92,7 +92,19 @@ catalog-restore: doctor ## Restore catalog into an empty DB using RECOVERY_BOT_T
 	@$(COMPOSE) run --rm -e RECOVERY_BOT_TOKEN -e RECOVERY_CHAT_ID -e RECOVERY_FILE app catalog-restore
 
 export-key: doctor ## Export base64 key to KEY_OUTPUT under a mounted directory
-	@$(COMPOSE) run --rm -e KEY_OUTPUT app export-key
+	@$(COMPOSE) run --rm --no-deps -e EXPORT_UID="$$(id -u)" -e EXPORT_GID="$$(id -g)" -e KEY_OUTPUT="$(or $(KEY_OUTPUT),/data/backups/master.key)" app export-key
 
 recovery-resume: doctor ## Enable writes after catalog recovery
 	@$(COMPOSE) run --rm app recovery-resume
+
+backup-db: doctor ## Save a plain PostgreSQL snapshot under data/backups
+	@$(COMPOSE) run --rm --no-deps -e EXPORT_UID="$$(id -u)" -e EXPORT_GID="$$(id -g)" app backup-db
+
+migration-export: doctor ## Export key, database and settings; briefly pauses app
+	@sh scripts/migration.sh export
+
+migration-handoff: doctor ## Final export and stop old app/Bot API for migration
+	@sh scripts/migration.sh handoff
+
+migration-restore: ## Restore files beside Makefile; PUBLIC_URL=http://SERVER_IP:8088
+	@PUBLIC_URL="$(PUBLIC_URL)" PORT="$(or $(PORT),8088)" MIGRATION_DIR="$(MIGRATION_DIR)" sh scripts/migration.sh restore

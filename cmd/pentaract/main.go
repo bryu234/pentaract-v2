@@ -112,7 +112,10 @@ func run(logger *slog.Logger, args []string) error {
 		if err != nil {
 			return err
 		}
-		return closeErr
+		if closeErr != nil {
+			return closeErr
+		}
+		return migrationOwner(out)
 	case "catalog-publish", "catalog-restore", "recovery-resume", "catalog-verify", "bot-logout":
 		pool, err := database.Open(ctx, cfg.DatabaseURL)
 		if err != nil {
@@ -188,6 +191,8 @@ func run(logger *slog.Logger, args []string) error {
 			return errors.New("catalog belongs to another chat")
 		}
 		return recovery.Restore(ctx, pool, catalog, key, token, tg)
+	case "migration-export", "migration-config", "migration-import", "backup-db":
+		return migrationCommand(ctx, cfg, logger, command)
 	case "backup":
 		return backup(ctx, cfg, logger)
 	case "restore":

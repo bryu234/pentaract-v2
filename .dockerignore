@@ -6,3 +6,13 @@ web/dist
 coverage
 *.pv2backup
 
+
+# Plain migration secrets
+master.key
+database.dump
+restore.json
+*.dump
+**/master.key
+**/database.dump
+**/restore.json
+**/*.dump

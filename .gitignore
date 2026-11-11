@@ -11,3 +11,9 @@ coverage/
 
 # Host-specific Compose selection
 docker-compose.override.yml
+
+# Plain migration secrets
+master.key
+database.dump
+restore.json
+*.dump

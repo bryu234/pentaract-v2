@@ -111,3 +111,5 @@ points to `web/src`, so a repository-root `components/ui` would be outside the a
 Tailwind is connected through `@tailwindcss/vite` and `src/tailwind.css`; Preflight
 is intentionally omitted to preserve the existing application styles. Install the
 locked dependencies with `npm ci` in `web/` and use `npm run build` to validate.
+
+Пошаговый перенос через Make: [инструкция на русском](MIGRATION.ru.md).

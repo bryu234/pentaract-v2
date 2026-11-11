@@ -112,3 +112,5 @@ Architecture details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 Recovery without the old database and NPM deployment: [Recovery guide](docs/RECOVERY.md).
 Trash expires after 72 hours. Expired catalog entries are removed automatically; encrypted Telegram messages are retained.
+
+Пошаговый перенос через Make: [инструкция на русском](docs/MIGRATION.ru.md).

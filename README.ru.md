@@ -112,3 +112,5 @@ docker compose config -q
 
 Recovery without the old database and NPM deployment: [Recovery guide](docs/RECOVERY.md).
 Automatic trash purging is temporarily disabled; trash remains recoverable.
+
+Пошаговый перенос через Make: [инструкция на русском](docs/MIGRATION.ru.md).
